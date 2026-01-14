@@ -1,0 +1,7 @@
+# Environment Variables
+.env
+**/.env
+env/
+
+# JSON file 
+tokens.json

@@ -1,3 +1,3 @@
 Name: Arthur Tian
 =====
-test.
+i love pink haired girls
