@@ -1,119 +1,146 @@
-import os # access env variables such as FITBIT_CLIENT_ID
-from dotenv import load_dotenv # lets us read from .env
-import urllib.parse # for building urls
+import os
+from dotenv import load_dotenv 
+import urllib.parse #builds url
 from flask import Flask, request
-import requests #making requests to http
-import base64 #encoding client_id and secret into base64 for lord fitbit
+import requests #http requests
+import base64 #encoding and decoding
 import threading 
 import json
+from datetime import datetime, timedelta
 
-# loads the variables from .env into the actual environment
+
+
+#load and access .env variables
 load_dotenv()
-
-# grab the variables that OAuth wants
 CLIENT_ID = os.getenv("FITBIT_CLIENT_ID")
 CLIENT_SECRET = os.getenv("FITBIT_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("FITBIT_REDIRECT_URI")
+TOKEN_URL = "https://api.fitbit.com/oauth2/token"
 
-##########################################################
-
-def start_auth_flow():
-    #opens fitbit login page in the new browser
-    #will be able to call this function from ui.py!
-    import webbrowser
-    print("\nOpening Fitbit Login Page")
-    webbrowser.open(auth_url)
-    
-def start_server():
-    """Run Flask in a background thread so PyQt stays responsive."""
-    thread = threading.Thread(target=lambda: app.run(port=8080, debug=True, use_reloader=False))
-    thread.daemon = True
-    thread.start()
-
-#function that gets the token 
-def exchange_code_for_token(auth_code):
-    #fitbit token URL grabber
-    TOKEN_URL = "https://api.fitbit.com/oauth2/token"
-    
-    #funky base64 format
+#getter function 
+def get_auth_headers():
+    #encoding into b64 to communicate with oauth
     client_creds = f"{CLIENT_ID}:{CLIENT_SECRET}"
     client_creds_b64 = base64.b64encode(client_creds.encode()).decode()
     
-    headers = {
-        "Authorization": f"Basic {client_creds_b64}", #our credentials
+    #POST request
+    return {
+        "Authorization": f"Basic {client_creds_b64}",
         "Content-Type":"application/x-www-form-urlencoded" 
     }
-    
-    #POST is a protocol used to send data to a server
-    
-    #POST data: 
+
+#getter function
+def get_token_data(grant_type, **kwargs):
     data = {
         "client_id": CLIENT_ID,
-        "grant_type": "authorization_code",
-        "redirect_uri": REDIRECT_URI,
-        "code": auth_code
+        "grant_type": grant_type,
     }
     
-    #POST request
-    response = requests.post(TOKEN_URL, headers=headers, data=data)
+    if grant_type == "authorization_code":
+        data.update({
+            "redirect_uri": REDIRECT_URI,
+            "code": kwargs["code"]
+        })
+    elif grant_type == "refresh_token":
+        data.update({
+            "refresh_token": kwargs["refresh_token"]
+        })
     
-    #convert the response we get into JSON
-    token_data = response.json()
-    
-    #stuff for debugging
-    print("\n==== TOKEN RESPONSE FROM FITBIT ====")
-    print(token_data)
-    print("===================================")
-    
-    return token_data
+    return data
 
-def save_tokens(token_data):
-    #opens a json file named tokens.json
-    #cont... w = we are writing to it, saved as variable called f
-    with open("tokens.json", "w") as f: 
-        json.dump(token_data, f, indent = 4) #puts the data in here
-        
-def load_tokens():
-    with open("tokens.json", "r") as f:
-        return json.load(f)
-
-################################################################
-
-#print confirmation that these were loaded to terminal
-print("Client ID loaded: ", CLIENT_ID)
-print("Redirect URI loaded: ", REDIRECT_URI)
-
-AUTH_URL = "https://www.fitbit.com/oauth2/authorize"
-
-#parameters that fitbit wants
+#parameters for fitbit
 params = {
     "response_type": "code",
     "client_id": CLIENT_ID,
     "redirect_uri": REDIRECT_URI,
-    "scope": "activity heartrate sleep profile", #for now...    
+    "scope": "activity heartrate sleep profile",  
 }
 
-#build full URL including parameters
-auth_url = AUTH_URL + "?" + urllib.parse.urlencode(params)
+#link for user to sign in
+auth_url = "https://www.fitbit.com/oauth2/authorize?" + urllib.parse.urlencode(params)
 
-#print to console for now, will switch to automated with button later.. 
-print("\n Open this URL in browser to login with fitbit")
-print(auth_url)
-
-#constructor... FLASK LINKS MY CODE AND FUNCTIONS TO THE WEBSITES!!!
+#create flask object
 app = Flask(__name__)
 
-@app.route("/callback") #makes client go to callback function
+#starts flask server
+def start_server():
+    #starts running flask server in a background threat, UI stays responsive
+    thread = threading.Thread(target = lambda: app.run(port = 8080, debug = True, use_reloader = False))
+    thread.daemon = True
+    thread.start()
+    
+#opens fitbit login webpage
+def start_auth_flow():
+    import webbrowser
+    webbrowser.open(auth_url)
+    
+#exchange authorization code for API access token
+def exchange_code_for_token(auth_code):
+    #url to grab fitbit api token
+    TOKEN_URL = "https://api.fitbit.com/oauth2/token"
+    
+    #POST request 
+    headers = get_auth_headers()
+    data = get_token_data("authorization_code", code = auth_code)
+    
+    response = requests.post(TOKEN_URL, headers = headers, data = data)
+    
+    #convert this response into a JSON string
+    token_data = response.json()
+    
+    return token_data
+
+#saves token to tokens.json
+def save_tokens(token_data):
+    with open("tokens.json", "w") as token_file:
+        json.dump(token_data, token_file, indent = 4)   
+
+#loads token from tokens.json file
+def load_tokens():
+    try:
+        with open("tokens.json", "r") as token_file:
+            return json.load(token_file)
+    except FileNotFoundError:
+        return None
+    
+#refreshes the access token
+def refresh_access_token(refresh_token_value):
+    headers = get_auth_headers()
+    data = get_token_data("refresh_token", refresh_token = refresh_token_value)
+    
+    #create new POST request 
+    response = requests.post(TOKEN_URL, headers = headers, data = data)
+    token_data = response.json()
+    
+    #saving new token or throwing exception 
+    if 'access_token' in token_data:
+        save_tokens(token_data)
+        return token_data
+    else:
+        raise Exception(f"Token refresh failed: {token_data}")
+    
+#checks for token validity and refreshes if its expired 
+def check_token_expiry():
+    tokens = load_tokens()
+    if not tokens:
+        return None
+    
+    #checking expiry 
+    expires_at = tokens.get('expires_at')
+    if expires_at:
+        expiry_time = datetime.fromtimestamp(expires_at)
+        if expiry_time < datetime.now():
+            print("token is expired, refreshing...")
+            return refresh_access_token(tokens['refresh_token'])
+        
+    return tokens
+
+@app.route("/callback")
 def callback():
     code = request.args.get("code")
-    print("\n Authorization code get!: ", code)
-    
     token_data = exchange_code_for_token(code)
-    access_token = token_data.get("access_token")
-    
-    save_tokens(access_token)
-    print("\nYour Access Token: ", access_token)
-    return "auth success! close this window and return to app"
+    save_tokens(token_data)
+    return "auth success! close this window and return to app!"
 
-if __name__ == "__main__": #runs to redirect uri: http://localhost:8000/callback
+if __name__ == "__main__":
     app.run(port = 8080, debug = True)
