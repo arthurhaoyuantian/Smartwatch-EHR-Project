@@ -26,11 +26,7 @@ class EHRDatabase:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 patient_id INTEGER,
                 date TEXT,
-                steps INTEGER,
-                heart_rate_avg INTEGER,
-                heart_rate_min INTEGER,
-                heart_rate_max INTEGER,
-                sleep_duration REAL,
+                steps INTEGER, 
                 source TEXT,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (patient_id) REFERENCES patients(patient_id),
@@ -69,29 +65,10 @@ class EHRDatabase:
         )
         return cursor.fetchone()
     
-    #adds the daily health metrics for a patient 
-    def add_health_data(self, patient_id, date, steps = None, heart_rate_avg = None, 
-                        heart_rate_min = None, heart_rate_max = None, sleep_duration = None,
-                        source = 'fitbit'):
-        try:
-            self.conn.execute('''
-                INSERT INTO health_metrics (
-                    patient_id, date, steps, heart_rate_avg, heart_rate_min, 
-                    heart_rate_max, sleep_duration, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (patient_id, date, steps, heart_rate_avg, heart_rate_min, 
-                    heart_rate_max, sleep_duration, source)
-            )
-            
-            self.conn.commit()
-            return True
-        except sqlite3.IntegrityError:
-            return False
-    
-    #returns the health metrics of a patient, filtered by date range if included
+    #returns the health metrics of a patient, filtered by date range if included -> CONNECTION TO UI
     def get_patient_health_data(self, patient_id, start_date = None, end_date = None):
         query = '''
-            SELECT date, steps, heart_rate_avg, heart_rate_min, 
-            heart_rate_max, sleep_duration, source FROM health_metrics 
+            SELECT date, steps, source FROM health_metrics 
             WHERE patient_id = ?
         '''
         params = [patient_id]
@@ -103,12 +80,12 @@ class EHRDatabase:
             query += ' AND date <= ?'
             params.append(end_date)
         
-        query += 'ORDER BY date'
+        query += ' ORDER BY date'
         
         cursor = self.conn.execute(query, params)
         return cursor.fetchall() #return all data that matches these params specific to this patient
     
-    #adds this patient to the csv file on storage 
+    #adds this patient to the csv file on storage ->    
     def export_patient_to_csv(self, patient_id, filename):
         import csv
         
@@ -116,7 +93,7 @@ class EHRDatabase:
         
         with open(filename, 'w', newline = '') as my_file:
             writer = csv.writer(my_file)
-            writer.writerow(['date', 'steps', 'hr_avg', 'hr_min', 'hr_max', 'sleep', 'source'])
+            writer.writerow(['date', 'steps', 'source'])
             writer.writerows(data)
             
         return len(data)
@@ -124,3 +101,63 @@ class EHRDatabase:
     #closes database connection 
     def close(self):
         self.conn.close()
+        
+    
+    #delete a patient and all associated health data 
+    def delete_patient(self, patient_id):
+        try: 
+            self.conn.execute('DELETE FROM health_metrics WHERE patient_id = ?',
+                              (patient_id,))
+            self.conn.execute('DELETE FROM patients WHERE patient_id = ?',
+                              (patient_id,))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"error {e}")
+            return False
+        
+    ####################################################################################################################
+        
+    #adds the daily health metrics for a patient -> GOOD FOR MANUAL ENTERING (METRICS ARE PARAMETERS)
+    def add_health_data(self, patient_id, date, steps = None, source = 'fitbit'):
+        try:
+            self.conn.execute('''
+                INSERT INTO health_metrics (
+                    patient_id, date, steps, source) VALUES (?, ?, ?, ?)
+            ''', (patient_id, date, steps, source)
+            )
+            
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+        
+    #adds fitbit data from the given time period to the database -> ONLY FOR FITBIT
+    def import_fitbit_data(self, patient_id, start, end):
+        from fitbit_api import FitbitAPI
+        
+        #highlighting patient
+        patient = self.get_patient_by_id(patient_id) 
+        if not patient:
+            print(f"error, patient {patient_id} not found")
+            return 0
+        
+        #getting data
+        api = FitbitAPI()
+        steps_response = api.get_steps(start, end) 
+        
+        #saving to db
+        imported_count = 0
+        if 'activities-steps' in steps_response:
+            for day in steps_response['activities-steps']:
+                success = self.add_health_data(
+                    patient_id=patient_id,
+                    date=day['dateTime'],
+                    steps=int(day['value']),
+                    source='fitbit'
+                )
+                if success:
+                    imported_count += 1
+                    
+        return imported_count
+        
