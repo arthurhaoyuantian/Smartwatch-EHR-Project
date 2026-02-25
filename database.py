@@ -39,26 +39,18 @@ class EHRDatabase:
         
         
     #CRUD methods 
+
+    ##########################################################################
     
-    #adds a patient to table
-    def add_patient(self, name, fitbit_user_id = None):
-        try:
-            cursor = self.conn.execute(
-                'INSERT INTO patients (name, fitbit_user_id) VALUES (?, ?)',
-                (name, fitbit_user_id)
-            )
-            self.conn.commit()
-            return cursor.lastrowid
-        except sqlite3.IntegrityError:
-            return None
-        
-    #returns all patients as a list of tuples
+    #READING ~~~~~~~~~~~~~
+    
+    #returns a list of patient information as tuples 
     def get_all_patients(self):
         cursor = self.conn.execute('SELECT patient_id, name FROM patients ORDER BY name')
         return cursor.fetchall()
     
     #returns individual patient as a tuple 
-    def get_patient_by_id(self, patient_id):
+    def get_patient_info(self, patient_id):
         cursor = self.conn.execute(
             'SELECT patient_id, name, fitbit_user_id FROM patients WHERE patient_id = ?',
             (patient_id,)
@@ -85,38 +77,19 @@ class EHRDatabase:
         cursor = self.conn.execute(query, params)
         return cursor.fetchall() #return all data that matches these params specific to this patient
     
-    #adds this patient to the csv file on storage ->    
-    def export_patient_to_csv(self, patient_id, filename):
-        import csv
+    #UPDATING ~~~~~~~~~~~~~~~~~~
         
-        data = self.get_patient_health_data(patient_id)
-        
-        with open(filename, 'w', newline = '') as my_file:
-            writer = csv.writer(my_file)
-            writer.writerow(['date', 'steps', 'source'])
-            writer.writerows(data)
-            
-        return len(data)
-            
-    #closes database connection 
-    def close(self):
-        self.conn.close()
-        
-    
-    #delete a patient and all associated health data 
-    def delete_patient(self, patient_id):
-        try: 
-            self.conn.execute('DELETE FROM health_metrics WHERE patient_id = ?',
-                              (patient_id,))
-            self.conn.execute('DELETE FROM patients WHERE patient_id = ?',
-                              (patient_id,))
+    #adds a patient to table
+    def add_patient(self, name, fitbit_user_id = None):
+        try:
+            cursor = self.conn.execute(
+                'INSERT INTO patients (name, fitbit_user_id) VALUES (?, ?)',
+                (name, fitbit_user_id)
+            )
             self.conn.commit()
-            return True
-        except Exception as e:
-            print(f"error {e}")
-            return False
-        
-    ####################################################################################################################
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            return None
         
     #adds the daily health metrics for a patient -> GOOD FOR MANUAL ENTERING (METRICS ARE PARAMETERS)
     def add_health_data(self, patient_id, date, steps = None, source = 'fitbit'):
@@ -137,7 +110,7 @@ class EHRDatabase:
         from fitbit_api import FitbitAPI
         
         #highlighting patient
-        patient = self.get_patient_by_id(patient_id) 
+        patient = self.get_patient_info(patient_id) 
         if not patient:
             print(f"error, patient {patient_id} not found")
             return 0
@@ -160,4 +133,37 @@ class EHRDatabase:
                     imported_count += 1
                     
         return imported_count
+            
+    #DELETING ~~~~~~~~~~~~~~~~
+    
+    #delete a patient and all associated health data 
+    def delete_patient(self, patient_id):
+        try: 
+            self.conn.execute('DELETE FROM health_metrics WHERE patient_id = ?',
+                              (patient_id,))
+            self.conn.execute('DELETE FROM patients WHERE patient_id = ?',
+                              (patient_id,))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"error {e}")
+            return False
+    
+    #MISC ~~~~~~~~~~~~~~~~~
+            
+    #adds this patient to the csv file on storage
+    def export_patient_to_csv(self, patient_id, filename):
+        import csv
         
+        data = self.get_patient_health_data(patient_id)
+        
+        with open(filename, 'w', newline = '') as my_file:
+            writer = csv.writer(my_file)
+            writer.writerow(['date', 'steps', 'source'])
+            writer.writerows(data)
+            
+        return len(data)
+    
+    #closes database connection 
+    def close(self):
+        self.conn.close()

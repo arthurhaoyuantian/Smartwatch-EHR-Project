@@ -8,7 +8,6 @@ db = EHRDatabase("simple_ehr.db")
 try:
     #EXPLANATION OF WORKFLOW HERE WOAH SO CONVENIENT TO DO IT HERE
     
-    """
     #STEP 1: CREATE A NEW PATIENT
     patient_id1 = db.add_patient("Arthur")
     print(f"Patient ID1: {patient_id1}")
@@ -25,7 +24,6 @@ try:
     
     count = db.export_patient_to_csv(patient_id1, "test_simple.csv")
 
-    """
 
 
 except Exception as e:
