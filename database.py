@@ -40,9 +40,9 @@ class EHRDatabase:
         
     #CRUD methods 
 
-    ##########################################################################
+    ###########################################################################################
     
-    #READING ~~~~~~~~~~~~~
+    #READING ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     
     #returns a list of patient information as tuples 
     def get_all_patients(self):
@@ -77,7 +77,42 @@ class EHRDatabase:
         cursor = self.conn.execute(query, params)
         return cursor.fetchall() #return all data that matches these params specific to this patient
     
-    #UPDATING ~~~~~~~~~~~~~~~~~~
+    #returns true if the patient exists 
+    def check_patient_exists(self, patient_id):
+        cursor = self.conn.execute(
+            'SELECT 1 FROM patients WHERE patient_id = ?',
+            (patient_id,)
+        )
+        return cursor.fetchone() is not None
+    
+    #returns the latest date where patient health data was updated
+    def get_latest_health_entry_date(self, patient_id):
+        try:
+            if not self.check_patient_exists(patient_id):
+                print(f"Warning: Patient {patient_id} not found")
+                return None
+            
+            cursor = self.conn.execute('''
+                SELECT date FROM health_metrics
+                WHERE patient_id = ?
+                ORDER BY date DESC
+                LIMIT 1
+            ''', (patient_id,))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                print(f"Latest data for patient {patient_id}:{result[0]}")
+                return result[0]
+            else:
+                return None
+        except Exception as e:
+            print(f"Error getting latest health date: {e}")
+            return None
+        
+    
+    
+    #UPDATING ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         
     #adds a patient to table
     def add_patient(self, name, fitbit_user_id = None):
@@ -133,8 +168,46 @@ class EHRDatabase:
                     imported_count += 1
                     
         return imported_count
-            
-    #DELETING ~~~~~~~~~~~~~~~~
+    
+    def update_patient_info(self, patient_id, name=None, fitbit_user_id=None):
+        if not self.check_patient_exists(patient_id):
+            print(f"Error, patient {patient_id} not found")
+            return False
+    
+        #building query 
+        updates = []
+        params = []
+        
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        
+        if fitbit_user_id is not None:
+            updates.append("fitbit_user_id = ?")
+            params.append(fitbit_user_id)
+        
+        #updates is empty, so no update
+        if not updates:
+            return True
+        
+        params.append(patient_id)
+        
+        try:
+            query = f"UPDATE patients SET {', '.join(updates)} WHERE patient_id = ?"
+            self.conn.execute(query, params)
+            self.conn.commit()
+            return True
+        
+        #in case of duplicate fitbit_user_id
+        except sqlite3.IntegrityError:
+            print(f"Error (Duplicate): Fitbit ID {fitbit_user_id} already in use...")
+            return False
+        
+        except Exception as e:
+            print(f"Error updating patient: {e}")
+            return False
+        
+    #DELETING ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     
     #delete a patient and all associated health data 
     def delete_patient(self, patient_id):
@@ -149,7 +222,7 @@ class EHRDatabase:
             print(f"error {e}")
             return False
     
-    #MISC ~~~~~~~~~~~~~~~~~
+    #MISC ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             
     #adds this patient to the csv file on storage
     def export_patient_to_csv(self, patient_id, filename):

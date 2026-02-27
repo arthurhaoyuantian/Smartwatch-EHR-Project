@@ -16,15 +16,16 @@ try:
     api = FitbitAPI()
     start = "2025-08-11"
     end = "2025-08-13"
+    
+    #getting data
     steps_data = api.get_steps(start, end)
     print(f"\nYour actual steps today: {steps_data}")
     
     #STEP 2: GET AND ADD DATA
     db.import_fitbit_data( patient_id1, start, end)
     
+    #reading data -> exporting to a CSV
     count = db.export_patient_to_csv(patient_id1, "test_simple.csv")
-
-
 
 except Exception as e:
     print(f"Fitbit test skipped: {e}")
